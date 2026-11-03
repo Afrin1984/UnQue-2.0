@@ -1,14 +1,16 @@
 import express from "express";
-import { setAvailability, cancelAppointments } from "../controllers/proff.js";
-import { authMiddleware } from "../middleware/auth.js"; 
-import { profMiddleware } from "../middleware/auth.js"; 
+import { setAvailability, cancelAppointments, updateAvailability } from "../controllers/proff.js";
+import { authMiddleware, profMiddleware } from "../middleware/auth.js";
+
 const router = express.Router();
 
+// Professor adds a free slot
+router.post("/availability", authMiddleware, profMiddleware, setAvailability);
 
-router.post("/availability", authMiddleware,profMiddleware, setAvailability);
+// Professor updates an existing FREE slot in place (new API)
+router.put("/availability/:slotId", authMiddleware, profMiddleware, updateAvailability);
 
-
-// Route to cancel appointments between professor and student - Only accessible to professors
+// Professor cancels appointments with a student
 router.patch("/cancel-appointments/:studentId", authMiddleware, profMiddleware, cancelAppointments);
 
 export default router;

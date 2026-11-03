@@ -107,4 +107,78 @@ const setAvailability = async (req, res, next) => {
       return next(new HttpError(error));
     }
   };
-export {setAvailability, cancelAppointments};
+  // Controller to update an existing FREE availability slot (new API)
+const updateAvailability = async (req, res, next) => {
+  try {
+    const { slotId } = req.params;
+    const { startTime, endTime } = req.body;
+    const professorId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(slotId)) {
+      return next(new HttpError("Invalid slot ID format", 400));
+    }
+    if (!startTime && !endTime) {
+      return next(new HttpError("Provide startTime and/or endTime to update", 400));
+    }
+
+    // 1. Find the slot and make sure it belongs to this professor
+    const slot = await Availability.findById(slotId);
+    if (!slot) {
+      return next(new HttpError("Slot not found", 404));
+    }
+    if (slot.professorId.toString() !== professorId) {
+      return next(new HttpError("You can only update your own slots", 403));
+    }
+
+    // 2. Work out the new times (keep the old value if only one is sent)
+    const newStart = startTime ? new Date(startTime) : slot.startTime;
+    const newEnd = endTime ? new Date(endTime) : slot.endTime;
+    if (isNaN(newStart.getTime()) || isNaN(newEnd.getTime())) {
+      return next(new HttpError("Invalid date format", 400));
+    }
+    if (newStart >= newEnd) {
+      return next(new HttpError("Start time must be before end time", 400));
+    }
+
+    // 3. Only FREE slots can be edited: no active booking inside the old window
+    const bookedAppointment = await Appointment.findOne({
+      professorId: slot.professorId,
+      status: "booked",
+      time: { $gte: slot.startTime, $lte: slot.endTime },
+    });
+    if (bookedAppointment) {
+      return next(new HttpError("This slot is already booked and cannot be updated", 409));
+    }
+
+    // 4. New times must not overlap another slot of this professor
+    const overlappingSlot = await Availability.findOne({
+      _id: { $ne: slot._id },
+      professorId: slot.professorId,
+      startTime: { $lt: newEnd },
+      endTime: { $gt: newStart },
+    });
+    if (overlappingSlot) {
+      return next(new HttpError("New time overlaps another of your slots", 400));
+    }
+
+    // 5. Update the SAME document in place (nothing is deleted)
+    const updatedSlot = await Availability.findOneAndUpdate(
+      { _id: slot._id, professorId: slot.professorId },
+      { startTime: newStart, endTime: newEnd },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      message: "Availability updated successfully",
+      availability: {
+        ...updatedSlot.toObject(),
+        startTime: moment.utc(updatedSlot.startTime).format("MMMM Do YYYY, h:mm:ss a"),
+        endTime: moment.utc(updatedSlot.endTime).format("MMMM Do YYYY, h:mm:ss a"),
+      },
+    });
+  } catch (error) {
+    console.error("Error updating availability:", error);
+    return next(new HttpError("Updating availability failed", 500));
+  }
+};
+export { setAvailability, cancelAppointments, updateAvailability };
